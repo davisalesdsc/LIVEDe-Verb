@@ -1,5 +1,7 @@
 # Aurora DeVerb
 
+![Aurora DeVerb](docs/screenshot.png)
+
 Plugin de **de-reverb para instrumentos**: reduz a reverberação, o eco e o som de sala de gravações de violão, guitarra, piano, bateria, cordas etc., sem amassar os ataques das notas.
 
 - Formatos: **AU, VST3, Standalone** (VST2 opcional, veja abaixo)
@@ -28,6 +30,8 @@ Processamento espectral (STFT, janelas de ~43 ms com 75% de sobreposição) base
 | **Mix** | 0–100% | Seco/processado (alinhado em fase, sem comb filter) |
 | **Output** | ±12 dB | Ganho de saída |
 | **Listen Removed** | on/off | Ouve só o que está sendo removido, ótimo para ajustar |
+
+**Analisador:** a linha verde é o som de saída; a área laranja é a reverb sendo removida em cada frequência, em tempo real.
 
 **Ponto de partida:** Reduction 70%, Room Decay 0,8 s, Early Keep 30 ms. Ligue *Listen Removed* e suba *Room Decay*/*Reduction* até ouvir só a sala, sem a nota. Depois desligue.
 
