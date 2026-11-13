@@ -1,0 +1,94 @@
+name: Build macOS (universal)
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    runs-on: macos-14   # Apple Silicon runner
+    timeout-minutes: 60
+    env:
+      ARTEFACTS: build/AuroraDeVerb_artefacts/Release
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: DSP engine tests
+        run: |
+          clang++ -O2 -std=c++17 -Wall -Wextra -ISource tests/test_engine.cpp -o engine_tests
+          ./engine_tests
+
+      - name: Configure (arm64 + x86_64)
+        run: cmake -B build -G Xcode -DAURORA_COPY_AFTER_BUILD=ON
+
+      - name: Build AU / VST3 / Standalone
+        run: cmake --build build --config Release --target AuroraDeVerb_All -- -quiet
+
+      - name: Check universal binaries
+        run: |
+          for b in "$ARTEFACTS/AU/Aurora DeVerb.component" "$ARTEFACTS/VST3/Aurora DeVerb.vst3" "$ARTEFACTS/Standalone/Aurora DeVerb.app"; do
+            archs=$(lipo -archs "$b/Contents/MacOS/Aurora DeVerb")
+            echo "$b -> $archs"
+            [[ "$archs" == *arm64* && "$archs" == *x86_64* ]] || { echo "::error::$b is not universal"; exit 1; }
+          done
+
+      - name: Validate AU with auval (Apple Silicon)
+        run: |
+          killall -9 AudioComponentRegistrar 2>/dev/null || true
+          auval -a | grep -i "Auro" || true
+          auval -strict -v aufx Advb Auro
+
+      - name: Validate AU with auval (Intel via Rosetta)
+        continue-on-error: true
+        run: |
+          softwareupdate --install-rosetta --agree-to-license >/dev/null 2>&1 || true
+          arch -x86_64 auval -v aufx Advb Auro
+
+      - name: Validate with pluginval (AU + VST3)
+        run: |
+          curl -sSL -o pluginval.zip https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_macOS.zip
+          unzip -q pluginval.zip
+          PV=pluginval.app/Contents/MacOS/pluginval
+          "$PV" --strictness-level 5 --skip-gui-tests --validate "$ARTEFACTS/VST3/Aurora DeVerb.vst3"
+          "$PV" --strictness-level 5 --skip-gui-tests --validate "$HOME/Library/Audio/Plug-Ins/Components/Aurora DeVerb.component"
+
+      - name: Version
+        id: ver
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=1.0.0-dev.${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build installer (.pkg + .dmg)
+        run: packaging/make_installer.sh "$ARTEFACTS" "${{ steps.ver.outputs.version }}" dist
+
+      - name: Installer smoke test
+        run: |
+          sudo installer -pkg dist/*.pkg -target /
+          ls -d "/Library/Audio/Plug-Ins/Components/Aurora DeVerb.component" \
+                "/Library/Audio/Plug-Ins/VST3/Aurora DeVerb.vst3" \
+                "/Applications/Aurora DeVerb.app"
+          pkgutil --pkgs | grep auroraaudio
+          lipo -archs "/Library/Audio/Plug-Ins/VST3/Aurora DeVerb.vst3/Contents/MacOS/Aurora DeVerb"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AuroraDeVerb-${{ steps.ver.outputs.version }}-macOS-universal
+          path: dist/*
+
+      - name: Publish GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --title "Aurora DeVerb $GITHUB_REF_NAME" \
+            --notes-file packaging/RELEASE_NOTES.md

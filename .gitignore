@@ -1,0 +1,10 @@
+build/
+dist/
+cmake-build-*/
+.DS_Store
+*.xcworkspace/xcuserdata/
+.vscode/
+.idea/
+engine_tests
+pluginval.app/
+pluginval.zip
