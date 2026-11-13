@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Criar release com esta tag (ex.: v1.0.0). Deixe vazio para so compilar.'
+        required: false
+        default: ''
   release:
     types: [published]
 
@@ -61,9 +66,13 @@ jobs:
 
       - name: Version
         id: ver
+        env:
+          RELEASE_TAG: ${{ github.event.inputs.release_tag }}
         run: |
           if [[ "$GITHUB_EVENT_NAME" == release ]]; then
             echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          elif [[ -n "$RELEASE_TAG" ]]; then
+            echo "version=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
           else
             echo "version=1.0.0-dev.${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
           fi
@@ -90,3 +99,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "$GITHUB_REF_NAME" dist/* --clobber --repo "$GITHUB_REPOSITORY"
+
+      - name: Create release (manual run with a tag)
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.release_tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.inputs.release_tag }}
+        run: |
+          gh release create "$RELEASE_TAG" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Aurora DeVerb $RELEASE_TAG" \
+            --notes-file packaging/RELEASE_NOTES.md
