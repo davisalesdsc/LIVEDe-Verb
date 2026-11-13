@@ -203,6 +203,9 @@ void AuroraDeVerbEditor::addKnob (Knob& k, const char* paramId, const juce::Stri
     k.slider.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
     k.slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 90, 20);
     k.slider.setRotaryParameters (juce::MathConstants<float>::pi * 1.25f, juce::MathConstants<float>::pi * 2.75f, true);
+    k.slider.setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
+    k.slider.setColour (juce::Slider::textBoxBackgroundColourId, juce::Colours::transparentBlack);
+    k.slider.setColour (juce::Slider::textBoxTextColourId, Colours::text);
     addAndMakeVisible (k.slider);
 
     k.label.setText (title, juce::dontSendNotification);
@@ -234,17 +237,21 @@ void AuroraDeVerbEditor::paint (juce::Graphics& g)
     g.setFont (juce::Font (juce::FontOptions (12.0f)));
     g.drawText ("instrument de-reverb", header, juce::Justification::centredRight);
 
-    // Reduction meter
+    // Reduction meter: label | bar | value
     g.setColour (Colours::panel);
-    g.fillRoundedRectangle (meterArea.toFloat(), 4.0f);
-    const float maxDb = 30.0f;
-    const float amount = juce::jlimit (0.0f, 1.0f, -meterDb / maxDb);
-    auto bar = meterArea.toFloat().reduced (3.0f);
-    g.setColour (Colours::accentWarm);
-    g.fillRoundedRectangle (bar.withWidth (bar.getWidth() * amount), 3.0f);
-    g.setColour (Colours::text);
+    g.fillRoundedRectangle (meterArea.toFloat(), 6.0f);
+    auto m = meterArea.reduced (12, 0);
+    g.setColour (Colours::textDim);
     g.setFont (juce::Font (juce::FontOptions (12.0f, juce::Font::bold)));
-    g.drawText ("REDUCTION  " + juce::String (meterDb, 1) + " dB", meterArea.reduced (10, 0), juce::Justification::centredLeft);
+    g.drawText ("REDUCTION", m.removeFromLeft (90), juce::Justification::centredLeft);
+    g.setColour (Colours::text);
+    g.drawText (juce::String (meterDb, 1) + " dB", m.removeFromRight (70), juce::Justification::centredRight);
+    auto bar = m.reduced (8, 0).toFloat().withSizeKeepingCentre ((float) m.reduced (8, 0).getWidth(), 10.0f);
+    g.setColour (Colours::track);
+    g.fillRoundedRectangle (bar, 5.0f);
+    const float amount = juce::jlimit (0.0f, 1.0f, -meterDb / 30.0f);
+    g.setColour (Colours::accentWarm);
+    g.fillRoundedRectangle (bar.withWidth (juce::jmax (10.0f, bar.getWidth() * amount)), 5.0f);
 }
 
 void AuroraDeVerbEditor::resized()
