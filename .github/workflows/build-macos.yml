@@ -3,9 +3,10 @@ name: Build macOS (universal)
 on:
   push:
     branches: [main]
-    tags: ['v*']
   pull_request:
   workflow_dispatch:
+  release:
+    types: [published]
 
 permissions:
   contents: write
@@ -61,7 +62,7 @@ jobs:
       - name: Version
         id: ver
         run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+          if [[ "$GITHUB_EVENT_NAME" == release ]]; then
             echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
           else
             echo "version=1.0.0-dev.${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
@@ -84,11 +85,8 @@ jobs:
           name: AuroraDeVerb-${{ steps.ver.outputs.version }}-macOS-universal
           path: dist/*
 
-      - name: Publish GitHub release
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Attach installers to the release
+        if: github.event_name == 'release'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release create "$GITHUB_REF_NAME" dist/* \
-            --title "Aurora DeVerb $GITHUB_REF_NAME" \
-            --notes-file packaging/RELEASE_NOTES.md
+        run: gh release upload "$GITHUB_REF_NAME" dist/* --clobber --repo "$GITHUB_REPOSITORY"
