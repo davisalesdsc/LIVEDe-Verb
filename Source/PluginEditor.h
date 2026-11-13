@@ -12,6 +12,23 @@ public:
     void drawToggleButton (juce::Graphics&, juce::ToggleButton&, bool highlighted, bool down) override;
 };
 
+// Real-time analyser: input spectrum with the removed reverb highlighted.
+class SpectrumView final : public juce::Component
+{
+public:
+    static constexpr int numBands = aurora::DeVerbEngine::kDisplayBands;
+
+    void update (const AuroraDeVerbProcessor&);
+    void paint (juce::Graphics&) override;
+
+private:
+    float xForHz (float hz, float width) const;
+    float yForDb (float db, float height) const;
+
+    std::array<float, numBands> inDb {}, outDb {};
+    bool initialised = false;
+};
+
 class AuroraDeVerbEditor final : public juce::AudioProcessorEditor, private juce::Timer
 {
 public:
@@ -35,8 +52,9 @@ private:
     AuroraDeVerbProcessor& deverb;
     AuroraLookAndFeel lnf;
 
+    SpectrumView spectrum;
     Knob reduction, decay, early, floorKnob, release, lowProtect, mix, output;
-    juce::ToggleButton listen { "Listen Removed" };
+    juce::ToggleButton listen { "LISTEN REMOVED" };
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> listenAttachment;
 
     float meterDb = 0.0f;

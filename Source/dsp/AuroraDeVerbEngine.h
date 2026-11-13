@@ -15,6 +15,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <complex>
@@ -144,6 +145,20 @@ public:
         gainFinal.assign ((size_t) bins, 1.0f);
         onset.assign ((size_t) bins, 0);
 
+        bandOfBin.assign ((size_t) bins, -1);
+        for (int k = 1; k < bins; ++k)
+        {
+            const float f = (float) k * sr / (float) N;
+            if (f < kDisplayMinHz || f >= kDisplayMaxHz) continue;
+            const int b = (int) (std::log (f / kDisplayMinHz) / std::log (kDisplayMaxHz / kDisplayMinHz) * (float) kDisplayBands);
+            bandOfBin[(size_t) k] = std::clamp (b, 0, kDisplayBands - 1);
+        }
+        for (int b = 0; b < kDisplayBands; ++b)
+            nearestBinOfBand[(size_t) b] = std::clamp ((int) std::lround (displayBandCentreHz (b) * (float) N / sr), 1, bins - 1);
+        // Normalise so a full-scale sine reads ~0 dB (sqrt-Hann coherent gain = 2/pi).
+        const float coherent = (float) N / kPi;
+        displayNorm = 1.0f / (coherent * coherent);
+
         historyFrames = (int) std::ceil (kMaxEarlyMs * 0.001f * sr / (float) hop) + 2;
         history.assign ((size_t) (historyFrames * bins), 0.0f);
 
@@ -164,11 +179,26 @@ public:
         historyPos = 0;
         outGainCurrent = dbToGain (params.outputDb);
         reductionDb.store (0.0f);
+        for (auto& v : displayIn)  v.store (-120.0f);
+        for (auto& v : displayOut) v.store (-120.0f);
     }
 
     void setParameters (const DeVerbParameters& p) noexcept { params = p; }
 
     int getLatencySamples() const noexcept { return N; }
+
+    // ---- spectrum display (lock-free, safe to read from the UI thread)
+    static constexpr int kDisplayBands = 64;
+    static constexpr float kDisplayMinHz = 20.0f, kDisplayMaxHz = 20000.0f;
+
+    static float displayBandCentreHz (int band) noexcept
+    {
+        return kDisplayMinHz * std::pow (kDisplayMaxHz / kDisplayMinHz, ((float) band + 0.5f) / (float) kDisplayBands);
+    }
+
+    // Level of the input / processed signal in a display band, in dB (0 dB ~ full-scale sine).
+    float getDisplayInputDb (int band) const noexcept  { return displayIn[(size_t) band].load (std::memory_order_relaxed); }
+    float getDisplayOutputDb (int band) const noexcept { return displayOut[(size_t) band].load (std::memory_order_relaxed); }
 
     // Average gain reduction of the latest frame, in dB (<= 0). Safe to read from the UI thread.
     float getReductionDb() const noexcept { return reductionDb.load (std::memory_order_relaxed); }
@@ -342,8 +372,53 @@ private:
             gainFinal[(size_t) k] = params.listenRemoved ? 1.0f - wet : wet;
         }
 
+        updateDisplay();
+
         const float db = energyIn > 1e-12 ? (float) (10.0 * std::log10 (std::max (energyOut / energyIn, 1e-6))) : 0.0f;
         reductionDb.store (db, std::memory_order_relaxed);
+    }
+
+    void updateDisplay() noexcept
+    {
+        std::array<float, kDisplayBands> sumIn {}, sumOut {};
+        std::array<int, kDisplayBands> count {};
+
+        auto keptGain = [this] (int k)
+        {
+            const float g = gainFinal[(size_t) k];
+            return params.listenRemoved ? 1.0f - g : g;
+        };
+
+        for (int k = 1; k < bins; ++k)
+        {
+            const int b = bandOfBin[(size_t) k];
+            if (b < 0) continue;
+            const float g = keptGain (k);
+            sumIn[(size_t) b]  += power[(size_t) k];
+            sumOut[(size_t) b] += power[(size_t) k] * g * g;
+            ++count[(size_t) b];
+        }
+
+        for (int b = 0; b < kDisplayBands; ++b)
+        {
+            float pin, pout;
+            if (count[(size_t) b] > 0)
+            {
+                pin  = sumIn[(size_t) b] / (float) count[(size_t) b];
+                pout = sumOut[(size_t) b] / (float) count[(size_t) b];
+            }
+            else
+            {
+                const int k = nearestBinOfBand[(size_t) b];
+                const float g = keptGain (k);
+                pin  = power[(size_t) k];
+                pout = pin * g * g;
+            }
+            // +3 dB/octave tilt around 1 kHz so typical music reads roughly flat.
+            const float tilt = 3.0f * std::log2 (displayBandCentreHz (b) / 1000.0f);
+            displayIn[(size_t) b].store  (10.0f * std::log10 (pin  * displayNorm + 1e-12f) + tilt, std::memory_order_relaxed);
+            displayOut[(size_t) b].store (10.0f * std::log10 (pout * displayNorm + 1e-12f) + tilt, std::memory_order_relaxed);
+        }
     }
 
     DeVerbParameters params;
@@ -362,6 +437,11 @@ private:
 
     float outGainCurrent = 1.0f;
     std::atomic<float> reductionDb { 0.0f };
+
+    std::vector<int> bandOfBin;
+    std::array<int, kDisplayBands> nearestBinOfBand {};
+    float displayNorm = 1.0f;
+    std::array<std::atomic<float>, kDisplayBands> displayIn, displayOut;
 };
 
 } // namespace aurora

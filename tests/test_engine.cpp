@@ -166,6 +166,22 @@ int main()
         check (lateRed > 4.0, "reverberacao tardia (vs. referencia ideal) reduzida > 4 dB");
         check (atkChange > -1.0, "ataques preservados (perda < 1 dB)");
         check (e.getReductionDb() <= 0.0f, "medidor de reducao em dB valido");
+        {
+            // Look at the display while a note is sounding.
+            DeVerbEngine ed; ed.prepare (sr, 2); ed.setParameters (p);
+            const size_t upTo = s.notes[2].first + (size_t) (0.15f * sr) + (size_t) ed.getLatencySamples();
+            std::vector<float> dl (s.wetL.begin(), s.wetL.begin() + (std::ptrdiff_t) upTo), dr (s.wetR.begin(), s.wetR.begin() + (std::ptrdiff_t) upTo);
+            ed.process (dl.data(), dr.data(), (int) upTo);
+            const auto& e = ed;
+            bool ok = true; float maxIn = -200.0f;
+            for (int b = 0; b < DeVerbEngine::kDisplayBands; ++b)
+            {
+                const float i = e.getDisplayInputDb (b), o = e.getDisplayOutputDb (b);
+                ok &= std::isfinite (i) && std::isfinite (o) && o <= i + 0.01f;
+                maxIn = std::max (maxIn, i);
+            }
+            check (ok && maxIn > -60.0f && maxIn < 12.0f, "analisador espectral: valores validos (pico " + std::to_string (maxIn) + " dB)");
+        }
 
         // 3) Block-size independence.
         {

@@ -31,7 +31,7 @@ jobs:
           ./engine_tests
 
       - name: Configure (arm64 + x86_64)
-        run: cmake -B build -G Xcode -DAURORA_COPY_AFTER_BUILD=ON
+        run: cmake -B build -G Xcode -DAURORA_COPY_AFTER_BUILD=ON -DAURORA_BUILD_SNAPSHOT=ON
 
       - name: Build AU / VST3 / Standalone
         run: cmake --build build --config Release --target AuroraDeVerb_All -- -quiet
@@ -63,6 +63,20 @@ jobs:
           PV=pluginval.app/Contents/MacOS/pluginval
           "$PV" --strictness-level 5 --skip-gui-tests --validate "$ARTEFACTS/VST3/Aurora DeVerb.vst3"
           "$PV" --strictness-level 5 --skip-gui-tests --validate "$HOME/Library/Audio/Plug-Ins/Components/Aurora DeVerb.component"
+
+      - name: GUI snapshot (renders the real editor)
+        continue-on-error: true
+        run: |
+          cmake --build build --config Release --target AuroraDeVerbSnapshot -- -quiet
+          mkdir -p dist-gui
+          build/AuroraDeVerbSnapshot_artefacts/Release/AuroraDeVerbSnapshot dist-gui/aurora-deverb-gui.png
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gui-snapshot
+          path: dist-gui/*.png
+          if-no-files-found: ignore
 
       - name: Version
         id: ver

@@ -8,3 +8,4 @@ cmake-build-*/
 engine_tests
 pluginval.app/
 pluginval.zip
+dist_download/

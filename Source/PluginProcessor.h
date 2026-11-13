@@ -47,6 +47,8 @@ public:
     void setStateInformation (const void* data, int sizeInBytes) override;
 
     float getReductionDb() const noexcept { return engine.getReductionDb(); }
+    float getDisplayInputDb (int band) const noexcept { return engine.getDisplayInputDb (band); }
+    float getDisplayOutputDb (int band) const noexcept { return engine.getDisplayOutputDb (band); }
 
     juce::AudioProcessorValueTreeState apvts;
 

@@ -69,3 +69,22 @@ enable_testing()
 add_executable(AuroraDeVerbEngineTests tests/test_engine.cpp)
 target_include_directories(AuroraDeVerbEngineTests PRIVATE Source)
 add_test(NAME engine COMMAND AuroraDeVerbEngineTests)
+
+# GUI snapshot tool (CI renders the editor to a PNG)
+option(AURORA_BUILD_SNAPSHOT "Build the editor snapshot tool" OFF)
+if(AURORA_BUILD_SNAPSHOT)
+    juce_add_console_app(AuroraDeVerbSnapshot PRODUCT_NAME "AuroraDeVerbSnapshot")
+    target_sources(AuroraDeVerbSnapshot PRIVATE
+        tools/snapshot.cpp
+        Source/PluginProcessor.cpp
+        Source/PluginEditor.cpp)
+    target_include_directories(AuroraDeVerbSnapshot PRIVATE Source)
+    target_compile_definitions(AuroraDeVerbSnapshot PRIVATE
+        JucePlugin_Name="AuroraDeVerb"
+        JUCE_MODAL_LOOPS_PERMITTED=1
+        JUCE_WEB_BROWSER=0
+        JUCE_USE_CURL=0)
+    target_link_libraries(AuroraDeVerbSnapshot
+        PRIVATE juce::juce_audio_utils
+        PUBLIC juce::juce_recommended_config_flags)
+endif()

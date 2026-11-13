@@ -61,11 +61,119 @@ void AuroraLookAndFeel::drawToggleButton (juce::Graphics& g, juce::ToggleButton&
     g.drawText (b.getButtonText(), r, juce::Justification::centred);
 }
 
+// ---------------------------------------------------------------- spectrum view
+float SpectrumView::xForHz (float hz, float width) const
+{
+    using E = aurora::DeVerbEngine;
+    return width * std::log (hz / E::kDisplayMinHz) / std::log (E::kDisplayMaxHz / E::kDisplayMinHz);
+}
+
+float SpectrumView::yForDb (float db, float height) const
+{
+    constexpr float top = 6.0f, bottom = -78.0f;
+    return height * (top - juce::jlimit (bottom, top, db)) / (top - bottom);
+}
+
+void SpectrumView::update (const AuroraDeVerbProcessor& p)
+{
+    for (int b = 0; b < numBands; ++b)
+    {
+        const float in = p.getDisplayInputDb (b), out = p.getDisplayOutputDb (b);
+        if (! initialised)
+        {
+            inDb[(size_t) b] = in;
+            outDb[(size_t) b] = out;
+            continue;
+        }
+        // Fast rise, smooth fall (classic analyser ballistics).
+        auto ballistics = [] (float& v, float target) { v = target > v ? v + 0.6f * (target - v) : v + 0.18f * (target - v); };
+        ballistics (inDb[(size_t) b], in);
+        ballistics (outDb[(size_t) b], out);
+    }
+    initialised = true;
+    repaint();
+}
+
+void SpectrumView::paint (juce::Graphics& g)
+{
+    const auto bounds = getLocalBounds().toFloat();
+    g.setColour (Colours::panel);
+    g.fillRoundedRectangle (bounds, 6.0f);
+
+    auto plot = bounds.reduced (10.0f, 8.0f);
+    plot.removeFromBottom (14.0f);
+    const float w = plot.getWidth(), h = plot.getHeight();
+
+    // Grid
+    g.setFont (juce::Font (juce::FontOptions (10.0f)));
+    for (float hz : { 50.0f, 100.0f, 200.0f, 500.0f, 1000.0f, 2000.0f, 5000.0f, 10000.0f })
+    {
+        const float x = plot.getX() + xForHz (hz, w);
+        g.setColour (Colours::track.withAlpha (0.6f));
+        g.drawVerticalLine ((int) x, plot.getY(), plot.getBottom());
+        g.setColour (Colours::textDim);
+        const juce::String label = hz >= 1000.0f ? juce::String ((int) (hz / 1000.0f)) + "k" : juce::String ((int) hz);
+        g.drawText (label, juce::Rectangle<float> (x - 20.0f, plot.getBottom() + 1.0f, 40.0f, 13.0f), juce::Justification::centred);
+    }
+    for (float db : { 0.0f, -24.0f, -48.0f, -72.0f })
+    {
+        const float y = plot.getY() + yForDb (db, h);
+        g.setColour (Colours::track.withAlpha (0.45f));
+        g.drawHorizontalLine ((int) y, plot.getX(), plot.getRight());
+    }
+
+    // Curves
+    juce::Path inPath, outPath, removed, inFill;
+    for (int b = 0; b < numBands; ++b)
+    {
+        const float x = plot.getX() + xForHz (aurora::DeVerbEngine::displayBandCentreHz (b), w);
+        const float yi = plot.getY() + yForDb (inDb[(size_t) b], h);
+        const float yo = plot.getY() + yForDb (outDb[(size_t) b], h);
+        if (b == 0) { inPath.startNewSubPath (x, yi); outPath.startNewSubPath (x, yo); }
+        else        { inPath.lineTo (x, yi);          outPath.lineTo (x, yo); }
+    }
+
+    inFill = inPath;
+    inFill.lineTo (plot.getRight(), plot.getBottom());
+    inFill.lineTo (plot.getX(), plot.getBottom());
+    inFill.closeSubPath();
+    g.setColour (Colours::text.withAlpha (0.06f));
+    g.fillPath (inFill);
+
+    // Removed region = area between the input and the processed curves.
+    removed = outPath;
+    for (int b = numBands - 1; b >= 0; --b)
+        removed.lineTo (plot.getX() + xForHz (aurora::DeVerbEngine::displayBandCentreHz (b), w),
+                        plot.getY() + yForDb (inDb[(size_t) b], h));
+    removed.closeSubPath();
+    g.setColour (Colours::accentWarm.withAlpha (0.55f));
+    g.fillPath (removed);
+
+    g.setColour (Colours::textDim.withAlpha (0.8f));
+    g.strokePath (inPath, juce::PathStrokeType (1.0f));
+    g.setColour (Colours::accent);
+    g.strokePath (outPath, juce::PathStrokeType (2.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
+    // Legend
+    auto legend = bounds.reduced (14.0f, 10.0f).removeFromTop (14.0f).removeFromRight (230.0f);
+    g.setFont (juce::Font (juce::FontOptions (11.0f, juce::Font::bold)));
+    g.setColour (Colours::accent);
+    g.fillRect (legend.removeFromLeft (10.0f).reduced (0.0f, 3.0f));
+    legend.removeFromLeft (5.0f);
+    g.drawText ("OUTPUT", legend.removeFromLeft (60.0f), juce::Justification::centredLeft);
+    g.setColour (Colours::accentWarm);
+    g.fillRect (legend.removeFromLeft (10.0f).reduced (0.0f, 3.0f));
+    legend.removeFromLeft (5.0f);
+    g.drawText ("REVERB REMOVED", legend, juce::Justification::centredLeft);
+}
+
 // ---------------------------------------------------------------- editor
 AuroraDeVerbEditor::AuroraDeVerbEditor (AuroraDeVerbProcessor& p)
     : AudioProcessorEditor (&p), deverb (p)
 {
     setLookAndFeel (&lnf);
+
+    addAndMakeVisible (spectrum);
 
     addKnob (reduction,  ParamIDs::reduction,  "REDUCTION");
     addKnob (decay,      ParamIDs::decay,      "ROOM DECAY");
@@ -80,7 +188,7 @@ AuroraDeVerbEditor::AuroraDeVerbEditor (AuroraDeVerbProcessor& p)
     listen.setTooltip ("Hear only the reverb that is being removed");
     listenAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (deverb.apvts, ParamIDs::listen, listen);
 
-    setSize (720, 420);
+    setSize (760, 560);
     startTimerHz (30);
 }
 
@@ -111,6 +219,7 @@ void AuroraDeVerbEditor::timerCallback()
     // Fast fall, slower recovery so the meter is readable.
     meterDb = target < meterDb ? target : meterDb + 0.15f * (target - meterDb);
     repaint (meterArea);
+    spectrum.update (deverb);
 }
 
 void AuroraDeVerbEditor::paint (juce::Graphics& g)
@@ -142,6 +251,8 @@ void AuroraDeVerbEditor::resized()
 {
     auto area = getLocalBounds().reduced (20, 0);
     area.removeFromTop (56);
+    spectrum.setBounds (area.removeFromTop (170));
+    area.removeFromTop (8);
 
     auto bottom = area.removeFromBottom (56);
     bottom.removeFromBottom (14);
